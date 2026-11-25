@@ -1,0 +1,422 @@
+import javax.swing.*;
+import javax.swing.border.EmptyBorder;
+import java.awt.*;
+import java.util.*;
+import java.util.List;
+
+public class TripPlannerApp {
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            CityGraph graph = createSampleGraph();
+            RouteFinder routeFinder = new RouteFinder(graph);
+
+            JFrame frame = new JFrame("Tourist Trip Planner");
+            frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+            frame.setContentPane(new PlannerPanel(graph, routeFinder));
+            frame.pack();
+            frame.setMinimumSize(frame.getSize());
+            frame.setLocationRelativeTo(null);
+            frame.setVisible(true);
+        });
+    }
+
+    private static CityGraph createSampleGraph() {
+        CityGraph graph = new CityGraph();
+
+        graph.addCity("Jaipur", "Hawa Mahal, Amber Fort");
+        graph.addCity("Ajmer", "Ajmer Sharif Dargah, Ana Sagar Lake");
+        graph.addCity("Pushkar", "Brahma Temple, Pushkar Lake");
+        graph.addCity("Jodhpur", "Mehrangarh Fort, Umaid Bhawan Palace");
+        graph.addCity("Udaipur", "City Palace, Lake Pichola");
+        graph.addCity("Jaisalmer", "Jaisalmer Fort, Sam Sand Dunes");
+
+        graph.addRoute("Jaipur", "Ajmer", 135);
+        graph.addRoute("Jaipur", "Udaipur", 395);
+        graph.addRoute("Ajmer", "Pushkar", 15);
+        graph.addRoute("Ajmer", "Jodhpur", 205);
+        graph.addRoute("Ajmer", "Udaipur", 265);
+        graph.addRoute("Pushkar", "Jodhpur", 195);
+        graph.addRoute("Jodhpur", "Udaipur", 250);
+        graph.addRoute("Jodhpur", "Jaisalmer", 280);
+
+        return graph;
+    }
+}
+
+class CityGraph {
+
+    static class Edge {
+        final String destination;
+        final int distance;
+
+        Edge(String destination, int distance) {
+            this.destination = destination;
+            this.distance = distance;
+        }
+    }
+
+    private final Map<String, List<Edge>> adjList = new HashMap<>();
+    private final Map<String, String> cityInfo = new HashMap<>();
+
+    public void addCity(String name, String attractions) {
+        adjList.putIfAbsent(name, new ArrayList<>());
+        if (attractions != null && !attractions.trim().isEmpty()) {
+            cityInfo.put(name, attractions.trim());
+        } else {
+            cityInfo.putIfAbsent(name, "Local sightseeing");
+        }
+    }
+
+    public void addRoute(String city1, String city2, int distance) {
+        addCity(city1, cityInfo.getOrDefault(city1, "Local sightseeing"));
+        addCity(city2, cityInfo.getOrDefault(city2, "Local sightseeing"));
+
+        adjList.get(city1).add(new Edge(city2, distance));
+        adjList.get(city2).add(new Edge(city1, distance));
+    }
+
+    public List<Edge> getNeighbors(String city) {
+        return adjList.getOrDefault(city, Collections.emptyList());
+    }
+
+    public Set<String> getCities() {
+        return new TreeSet<>(adjList.keySet());
+    }
+
+    public String getCityInfo(String city) {
+        return cityInfo.getOrDefault(city, "Local sightseeing");
+    }
+
+    public int getDirectDistance(String from, String to) {
+        int minDist = Integer.MAX_VALUE;
+        for (Edge edge : getNeighbors(from)) {
+            if (edge.destination.equals(to) && edge.distance < minDist) {
+                minDist = edge.distance;
+            }
+        }
+        return minDist == Integer.MAX_VALUE ? 0 : minDist;
+    }
+}
+
+class RouteFinder {
+
+    private final CityGraph graph;
+    private static final double RATE_PER_KM = 5.0;
+
+    static class RouteResult {
+        final List<String> path;
+        final List<Integer> segmentDistances;
+        final int totalDistance;
+        final double estimatedCost;
+
+        RouteResult(List<String> path, List<Integer> segmentDistances, int totalDistance, double estimatedCost) {
+            this.path = path;
+            this.segmentDistances = segmentDistances;
+            this.totalDistance = totalDistance;
+            this.estimatedCost = estimatedCost;
+        }
+    }
+
+    RouteFinder(CityGraph graph) {
+        this.graph = graph;
+    }
+
+    public RouteResult findShortestPath(String source, String destination) {
+        Map<String, Integer> distances = new HashMap<>();
+        Map<String, String> previous = new HashMap<>();
+        Set<String> visited = new HashSet<>();
+
+        for (String city : graph.getCities()) {
+            distances.put(city, Integer.MAX_VALUE);
+        }
+
+        if (!distances.containsKey(source) || !distances.containsKey(destination)) {
+            return null;
+        }
+
+        distances.put(source, 0);
+        PriorityQueue> pq =
+                new PriorityQueue<>(Comparator.comparingInt(Map.Entry::getValue));
+        pq.offer(new AbstractMap.SimpleEntry<>(source, 0));
+
+        while (!pq.isEmpty()) {
+            Map.Entry<String, Integer> current = pq.poll();
+            String currentCity = current.getKey();
+
+            if (visited.contains(currentCity)) {
+                continue;
+            }
+            visited.add(currentCity);
+
+            if (currentCity.equals(destination)) {
+                break;
+            }
+
+            int currentDist = distances.get(currentCity);
+            for (CityGraph.Edge edge : graph.getNeighbors(currentCity)) {
+                if (visited.contains(edge.destination)) {
+                    continue;
+                }
+                int newDist = currentDist + edge.distance;
+                if (newDist < distances.get(edge.destination)) {
+                    distances.put(edge.destination, newDist);
+                    previous.put(edge.destination, currentCity);
+                    pq.offer(new AbstractMap.SimpleEntry<>(edge.destination, newDist));
+                }
+            }
+        }
+
+        int totalDist = distances.get(destination);
+        if (totalDist == Integer.MAX_VALUE) {
+            return null;
+        }
+
+        List<String> path = new ArrayList<>();
+        for (String at = destination; at != null; at = previous.get(at)) {
+            path.add(at);
+        }
+        Collections.reverse(path);
+
+        List<Integer> segmentDistances = new ArrayList<>();
+        segmentDistances.add(0);
+        for (int i = 0; i < path.size() - 1; i++) {
+            segmentDistances.add(graph.getDirectDistance(path.get(i), path.get(i + 1)));
+        }
+
+        return new RouteResult(path, segmentDistances, totalDist, calculateCost(totalDist));
+    }
+
+    public double calculateCost(int distance) {
+        return distance * RATE_PER_KM;
+    }
+}
+
+class PlannerPanel extends JPanel {
+
+    private final CityGraph graph;
+    private final RouteFinder routeFinder;
+
+    private JComboBox<String> sourceBox;
+    private JComboBox<String> destBox;
+    private JTextArea resultArea;
+
+    PlannerPanel(CityGraph graph, RouteFinder routeFinder) {
+        this.graph = graph;
+        this.routeFinder = routeFinder;
+        initUI();
+    }
+
+    private void initUI() {
+        setLayout(new BorderLayout(12, 12));
+        setBorder(new EmptyBorder(16, 16, 16, 16));
+        setBackground(new Color(245, 247, 250));
+
+        JLabel titleLabel = new JLabel("TOURIST TRIP PLANNER (JAVA)", SwingConstants.CENTER);
+        titleLabel.setFont(new Font("SansSerif", Font.BOLD, 20));
+        titleLabel.setForeground(new Color(30, 60, 114));
+        add(titleLabel, BorderLayout.NORTH);
+
+        JPanel controlsPanel = new JPanel(new GridBagLayout());
+        controlsPanel.setBackground(Color.WHITE);
+        controlsPanel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(210, 215, 222)),
+                new EmptyBorder(12, 12, 12, 12)
+        ));
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(6, 8, 6, 8);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+
+        sourceBox = new JComboBox<>();
+        destBox = new JComboBox<>();
+        refreshCityDropdowns();
+
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        controlsPanel.add(new JLabel("Start City:"), gbc);
+
+        gbc.gridx = 1;
+        gbc.weightx = 1.0;
+        controlsPanel.add(sourceBox, gbc);
+
+        gbc.gridx = 0;
+        gbc.gridy = 1;
+        gbc.weightx = 0;
+        controlsPanel.add(new JLabel("Destination:"), gbc);
+
+        gbc.gridx = 1;
+        gbc.weightx = 1.0;
+        controlsPanel.add(destBox, gbc);
+
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 4));
+        buttonPanel.setBackground(Color.WHITE);
+
+        JButton planBtn = new JButton("Plan Trip");
+        JButton addRouteBtn = new JButton("Add Route");
+        JButton resetBtn = new JButton("Reset");
+
+        planBtn.setBackground(new Color(30, 100, 200));
+        planBtn.setForeground(Color.WHITE);
+        planBtn.setFocusPainted(false);
+
+        planBtn.addActionListener(e -> handlePlanTrip());
+        addRouteBtn.addActionListener(e -> handleAddRoute());
+        resetBtn.addActionListener(e -> handleReset());
+
+        buttonPanel.add(planBtn);
+        buttonPanel.add(addRouteBtn);
+        buttonPanel.add(resetBtn);
+
+        gbc.gridx = 0;
+        gbc.gridy = 2;
+        gbc.gridwidth = 2;
+        controlsPanel.add(buttonPanel, gbc);
+
+        resultArea = new JTextArea(12, 42);
+        resultArea.setEditable(false);
+        resultArea.setFont(new Font("Monospaced", Font.PLAIN, 13));
+        resultArea.setMargin(new Insets(10, 10, 10, 10));
+        resultArea.setText("Select a Start City and Destination, then click 'Plan Trip'.");
+
+        JScrollPane scrollPane = new JScrollPane(resultArea);
+        scrollPane.setBorder(BorderFactory.createTitledBorder("Generated Itinerary"));
+
+        JPanel centerPanel = new JPanel(new BorderLayout(10, 10));
+        centerPanel.setBackground(new Color(245, 247, 250));
+        centerPanel.add(controlsPanel, BorderLayout.NORTH);
+        centerPanel.add(scrollPane, BorderLayout.CENTER);
+
+        add(centerPanel, BorderLayout.CENTER);
+    }
+
+    private void refreshCityDropdowns() {
+        String selectedSrc = (String) sourceBox.getSelectedItem();
+        String selectedDest = (String) destBox.getSelectedItem();
+
+        sourceBox.removeAllItems();
+        destBox.removeAllItems();
+
+        for (String city : graph.getCities()) {
+            sourceBox.addItem(city);
+            destBox.addItem(city);
+        }
+
+        if (selectedSrc != null) {
+            sourceBox.setSelectedItem(selectedSrc);
+        } else if (sourceBox.getItemCount() > 0) {
+            sourceBox.setSelectedItem("Jaipur");
+        }
+
+        if (selectedDest != null) {
+            destBox.setSelectedItem(selectedDest);
+        } else if (destBox.getItemCount() > 0) {
+            destBox.setSelectedItem("Jodhpur");
+        }
+    }
+
+    private void handlePlanTrip() {
+        String source = (String) sourceBox.getSelectedItem();
+        String destination = (String) destBox.getSelectedItem();
+
+        if (source == null || destination == null) {
+            JOptionPane.showMessageDialog(this, "Please select both cities.", "Input Error", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        if (source.equals(destination)) {
+            JOptionPane.showMessageDialog(this,
+                    "Start city and destination cannot be the same.",
+                    "Validation Error", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        RouteFinder.RouteResult result = routeFinder.findShortestPath(source, destination);
+        if (result == null) {
+            resultArea.setText("No connecting route found between " + source + " and " + destination + ".");
+            return;
+        }
+
+        displayItinerary(result);
+    }
+
+    private void displayItinerary(RouteFinder.RouteResult result) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Route: ").append(String.join(" -> ", result.path)).append("\n");
+        sb.append("--------------------------------------------------\n\n");
+
+        for (int i = 0; i < result.path.size(); i++) {
+            String city = result.path.get(i);
+            String stepInfo = (i == 0) ? "Start" : result.segmentDistances.get(i) + " km";
+            String attractions = graph.getCityInfo(city);
+
+            sb.append(String.format("%d. %-10s (%-7s) - %s%n", i + 1, city, stepInfo, attractions));
+        }
+
+        sb.append("\n--------------------------------------------------\n");
+        sb.append(String.format("Total Distance : %d km%n", result.totalDistance));
+        sb.append(String.format("Estimated Cost : Rs. %,.0f (at Rs. 5/km)%n", result.estimatedCost));
+
+        resultArea.setText(sb.toString());
+    }
+
+    private void handleAddRoute() {
+        JTextField city1Field = new JTextField();
+        JTextField city2Field = new JTextField();
+        JTextField distField = new JTextField();
+        JTextField info1Field = new JTextField();
+        JTextField info2Field = new JTextField();
+
+        JPanel form = new JPanel(new GridLayout(0, 2, 6, 6));
+        form.add(new JLabel("City 1 Name:"));
+        form.add(city1Field);
+        form.add(new JLabel("City 1 Attractions (optional):"));
+        form.add(info1Field);
+        form.add(new JLabel("City 2 Name:"));
+        form.add(city2Field);
+        form.add(new JLabel("City 2 Attractions (optional):"));
+        form.add(info2Field);
+        form.add(new JLabel("Distance (km):"));
+        form.add(distField);
+
+        int option = JOptionPane.showConfirmDialog(this, form, "Add New Destination / Route",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+
+        if (option == JOptionPane.OK_OPTION) {
+            String c1 = city1Field.getText().trim();
+            String c2 = city2Field.getText().trim();
+            String distText = distField.getText().trim();
+
+            if (c1.isEmpty() || c2.isEmpty() || c1.equalsIgnoreCase(c2)) {
+                JOptionPane.showMessageDialog(this, "Enter two distinct valid city names.", "Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            try {
+                int dist = Integer.parseInt(distText);
+                if (dist <= 0) {
+                    throw new NumberFormatException();
+                }
+                if (!info1Field.getText().trim().isEmpty()) {
+                    graph.addCity(c1, info1Field.getText().trim());
+                }
+                if (!info2Field.getText().trim().isEmpty()) {
+                    graph.addCity(c2, info2Field.getText().trim());
+                }
+                graph.addRoute(c1, c2, dist);
+                refreshCityDropdowns();
+                JOptionPane.showMessageDialog(this, "Route added: " + c1 + " <-> " + c2 + " (" + dist + " km)");
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(this, "Please enter a valid positive number for distance.", "Error", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+
+    private void handleReset() {
+        if (sourceBox.getItemCount() > 0) {
+            sourceBox.setSelectedIndex(0);
+            destBox.setSelectedIndex(0);
+        }
+        resultArea.setText("Select a Start City and Destination, then click 'Plan Trip'.");
+    }
+}
